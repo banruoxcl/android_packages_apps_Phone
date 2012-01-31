@@ -64,8 +64,8 @@
         prvandroid:leftChevronDrawable="@*android:drawable/ic_lockscreen_chevron_left"
         prvandroid:rightChevronDrawable="@*android:drawable/ic_lockscreen_chevron_right"
         prvandroid:feedbackCount="3"
-        prvandroid:horizontalOffset="0dip"
-        prvandroid:verticalOffset="100dip"
+        prvandroid:horizontalOffset="20dip"
+        prvandroid:verticalOffset="50dip"
         />
 
     <!--
