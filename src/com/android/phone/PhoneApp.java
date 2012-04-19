@@ -62,6 +62,11 @@ import com.android.internal.telephony.cdma.TtyIntent;
 import com.android.phone.OtaUtils.CdmaOtaScreenState;
 import com.android.server.sip.SipService;
 
+import android.os.Vibrator;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.os.HandlerThread;
+
 /**
  * Top-level Application class for the Phone app.
  */
@@ -234,6 +239,61 @@ public class PhoneApp extends Application implements AccelerometerListener.Orien
     // Current TTY operating mode selected by user
     private int mPreferredTtyMode = Phone.TTY_MODE_OFF;
 
+    // Phone Plus Settings
+    private static final String ACTION_VIBRATE_45 = "com.android.phone.PhoneApp.ACTION_VIBRATE_45";
+    private PendingIntent mVibrateIntent;
+    private Vibrator mVibrator = null;
+    private AlarmManager mAM;
+    private HandlerThread mVibrationThread;
+    private Handler mVibrationHandler;
+
+    public void startVib45(long callDurationMsec) {
+        if (VDBG) Log.i(LOG_TAG, "vibrate start @" + callDurationMsec);
+        stopVib45();
+        long timer = 0;
+        if (callDurationMsec > 45000){
+            // Schedule the alarm at the next minute + 45 secs
+            timer = 45000 + 60000 - callDurationMsec;
+        } else {
+            // Schedule the alarm at the first 45 second mark
+            timer = 45000 - callDurationMsec;
+        }
+        long nextalarm = SystemClock.elapsedRealtime() + timer;
+        if (VDBG) Log.i(LOG_TAG, "am at: " + nextalarm);
+        mAM.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, nextalarm, mVibrateIntent);
+    }
+    private void stopVib45() {
+        if (VDBG) Log.i(LOG_TAG, "vibrate stop @" + SystemClock.elapsedRealtime());
+        mAM.cancel(mVibrateIntent);
+    }
+    private final class TriVibRunnable implements Runnable {
+        private int v1, p1, v2;
+        TriVibRunnable(int a, int b, int c) {
+            v1 = a; p1 = b; v2 = c;
+        }
+        public void run() {
+            if (DBG) Log.i(LOG_TAG, "vibrate " + v1 + ":" + p1 + ":" + v2);
+            if (v1 > 0) mVibrator.vibrate(v1);
+            if (p1 > 0) SystemClock.sleep(p1);
+            if (v2 > 0) mVibrator.vibrate(v2);
+        }
+    }
+    public void vibrate(int v1, int p1, int v2) {
+        if (mVibrationThread == null) {
+            mVibrationThread = new HandlerThread("Vibrate 45 handler");
+            mVibrationThread.start();
+            mVibrationHandler = new Handler(mVibrationThread.getLooper());
+        }
+        mVibrationHandler.post(new TriVibRunnable(v1, p1, v2));
+    }
+    public void stopVibrationThread() {
+        stopVib45();
+        mVibrationHandler = null;
+        if (mVibrationThread != null) {
+            mVibrationThread.quit();
+            mVibrationThread = null;
+        }
+    }
     /**
      * Set the restore mute state flag. Used when we are setting the mute state
      * OUTSIDE of user interaction {@link PhoneUtils#startNewCall(Phone)}
@@ -531,6 +591,9 @@ public class PhoneApp extends Application implements AccelerometerListener.Orien
             intentFilter.addAction(TelephonyIntents.ACTION_RADIO_TECHNOLOGY_CHANGED);
             intentFilter.addAction(TelephonyIntents.ACTION_SERVICE_STATE_CHANGED);
             intentFilter.addAction(TelephonyIntents.ACTION_EMERGENCY_CALLBACK_MODE_CHANGED);
+            intentFilter.addAction(Intent.ACTION_SCREEN_OFF);
+            intentFilter.addAction(Intent.ACTION_SCREEN_ON);
+            intentFilter.addAction(ACTION_VIBRATE_45);
             if (mTtyEnabled) {
                 intentFilter.addAction(TtyIntent.TTY_PREFERRED_MODE_CHANGE_ACTION);
             }
@@ -573,6 +636,11 @@ public class PhoneApp extends Application implements AccelerometerListener.Orien
 
         // start with the default value to set the mute state.
         mShouldRestoreMuteOnInCallResume = false;
+
+        // Phone Plus Settings
+        mVibrator = (Vibrator) this.getSystemService(Context.VIBRATOR_SERVICE);
+        mAM = (AlarmManager) this.getSystemService(Context.ALARM_SERVICE);
+        mVibrateIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_VIBRATE_45), 0);
 
         // TODO: Register for Cdma Information Records
         // phone.registerCdmaInformationRecord(mHandler, EVENT_UNSOL_CDMA_INFO_RECORD, null);
@@ -1525,6 +1593,24 @@ public class PhoneApp extends Application implements AccelerometerListener.Orien
                 if (ringerMode == AudioManager.RINGER_MODE_SILENT) {
                     notifier.silenceRinger();
                 }
+            } else if (action.equals(Intent.ACTION_SCREEN_OFF) ||
+                    action.equals(Intent.ACTION_SCREEN_ON)) {
+                  if (VDBG) Log.d(LOG_TAG, "mReceiver: ACTION_SCREEN_OFF / ACTION_SCREEN_ON");
+                  /*
+                   * Disable Accelerometer Listener while in-call and the screen is off.
+                   * This is done to ensure that power consumption is kept to a minimum
+                   * in such a scenario
+                   */
+                  if (mAccelerometerListener != null) {
+                      mAccelerometerListener.enable(mLastPhoneState == Phone.State.OFFHOOK &&
+                              action.equals(Intent.ACTION_SCREEN_ON));
+                  }
+            // Phone Plus Settings
+            } else if (action.equals(ACTION_VIBRATE_45)) {
+                if (VDBG) Log.d(LOG_TAG, "mReceiver: ACTION_VIBRATE_45");
+                mAM.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 60000, mVibrateIntent);
+                if (VDBG) Log.d(LOG_TAG, "mReceiver: vibrate 45");
+                vibrate(70, 70, -1);
             }
         }
     }
